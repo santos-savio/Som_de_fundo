@@ -32,6 +32,18 @@ ENV/
 
 # Arquivos de configuração local
 config.json
+app_prefs.json
+
+# Dados locais do app (playlists)
+playlists/*.json
+
+# Cache de ícones por playlist (gerado automaticamente)
+icons/*/*.jpg
+
+# Logs e arquivos de sistema
+*.log
+Thumbs.db
+Desktop.ini
 
 # Executáveis
 *.ex
