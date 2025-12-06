@@ -1,4 +1,4 @@
-import os, sys, json, threading, time, math, webbrowser
+import os, sys, json, threading, time, math, webbrowser, zipfile, tempfile, shutil
 import pygame
 import qrcode
 from remote_control import RemoteControlServer
@@ -497,15 +497,35 @@ def abrir_arquivo(index):
             salvar_config()
             messagebox.showinfo("Sucesso", f"Arquivo adicionado ao botão {config['botoes'][index]['nome']}")
 
+def resolve_audio_path(p):
+    try:
+        if p and os.path.exists(p):
+            return p
+        base = os.path.basename(p) if p else ""
+        if base:
+            candidate = os.path.join(SONS_DIR, base)
+            if os.path.exists(candidate):
+                return candidate
+            for root, _, files in os.walk(SONS_DIR):
+                for fn in files:
+                    if fn.lower() == base.lower():
+                        return os.path.join(root, fn)
+    except Exception:
+        pass
+    return p
+
 def tocar_som(index):
     global current_index
     botao = config["botoes"][index]
-    caminho = botao["arquivo"]
+    caminho_orig = botao["arquivo"]
+    caminho = resolve_audio_path(caminho_orig)
+    if caminho != caminho_orig:
+        config["botoes"][index]["arquivo"] = caminho
+        salvar_config()
     if not caminho or not os.path.exists(caminho):
         resposta = messagebox.askyesno("Arquivo não encontrado", 
                                      f"Nenhum arquivo de som definido para este botão.\n\nDeseja adicionar um arquivo agora?")
         if resposta:
-            # Abre a janela de seleção de arquivo quando o usuário confirmar
             abrir_arquivo(index)
         return
     if current_index == index and pygame.mixer.music.get_busy():
@@ -600,12 +620,12 @@ def atualizar_timer():
         elapsed = int(time.time() - music_start_time)
         
         if current_index is not None and "arquivo" in config["botoes"][current_index]:
-            caminho = config["botoes"][current_index]["arquivo"]
-            nome_arquivo = os.path.basename(caminho)
-            nome_musica = os.path.splitext(nome_arquivo)[0]
+            caminho = resolve_audio_path(config["botoes"][current_index]["arquivo"]) 
+            nome_arquivo = os.path.basename(caminho) if caminho else ""
+            nome_musica = os.path.splitext(nome_arquivo)[0] if nome_arquivo else ""
             
             if "duracao" not in config["botoes"][current_index]:
-                duracao_total = obter_duracao_musica(caminho)
+                duracao_total = obter_duracao_musica(caminho) if caminho and os.path.exists(caminho) else 0
                 config["botoes"][current_index]["duracao"] = duracao_total
                 try:
                     salvar_config()
@@ -651,7 +671,7 @@ def pausar_retomar():
             pause_time = time.time() - music_start_time
     elif is_paused and current_index is not None:
         botao = config["botoes"][current_index]
-        caminho = botao["arquivo"]
+        caminho = resolve_audio_path(botao["arquivo"]) 
         volume = botao.get("volume", 1.0)
         
         pygame.mixer.music.stop()
@@ -684,7 +704,7 @@ def reiniciar_musica():
     if current_index is None:
         return
     botao = config["botoes"][current_index]
-    caminho = botao["arquivo"]
+    caminho = resolve_audio_path(botao["arquivo"]) 
     volume = botao.get("volume", 1.0)
     if not caminho or not os.path.exists(caminho):
         return
@@ -1163,6 +1183,124 @@ try:
 except:
     pass
 
+ 
+
+def exportar_backup():
+    try:
+        parar_tudo()
+    except Exception:
+        pass
+    backup_name = f"Som_de_fundo_backup_{time.strftime('%Y%m%d')}.zip"
+    path = filedialog.asksaveasfilename(defaultextension=".zip", initialfile=backup_name,
+                                        filetypes=[("Zip", "*.zip")], title="Salvar backup")
+    if not path:
+        return
+    try:
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            for root, _, files in os.walk(USER_DATA_DIR):
+                for fn in files:
+                    fp = os.path.join(root, fn)
+                    arc = os.path.relpath(fp, USER_DATA_DIR)
+                    z.write(fp, arc)
+            for file in os.listdir(PLAYLISTS_DIR):
+                if file.endswith(".json"):
+                    pl_name = file.replace(".json", "")
+                    try:
+                        with open(os.path.join(PLAYLISTS_DIR, file), "r", encoding="utf-8") as f:
+                            pdata = json.load(f)
+                        for b in pdata.get("botoes", []):
+                            imgp = b.get("imagem") or ""
+                            if imgp and os.path.exists(imgp):
+                                z.write(imgp, os.path.join("images", pl_name, os.path.basename(imgp)))
+                    except Exception:
+                        pass
+        messagebox.showinfo("Backup", "Backup exportado com sucesso!")
+    except Exception as e:
+        _show_error("Erro ao exportar backup", e)
+
+def importar_backup():
+    try:
+        parar_tudo()
+        try:
+            pygame.mixer.music.stop()
+        except Exception:
+            pass
+    except Exception:
+        pass
+    resposta = messagebox.askyesno("Importar Backup", "Para evitar arquivos bloqueados, feche o app antes de importar.\n\nDeseja continuar?")
+    if not resposta:
+        return
+    path = filedialog.askopenfilename(filetypes=[("Zip", "*.zip")], title="Selecionar backup")
+    if not path:
+        return
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp(prefix="Som_de_fundo_import_")
+        with zipfile.ZipFile(path, "r") as z:
+            z.extractall(tmpdir)
+        for root, _, files in os.walk(tmpdir):
+            for fn in files:
+                src = os.path.join(root, fn)
+                rel = os.path.relpath(src, tmpdir)
+                dest = os.path.join(USER_DATA_DIR, rel)
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    if not os.path.exists(dest):
+                        shutil.copy2(src, dest)
+                    else:
+                        try:
+                            os.replace(src, dest)
+                        except Exception:
+                            pass
+                except PermissionError:
+                    pass
+                except Exception:
+                    pass
+        for file in os.listdir(PLAYLISTS_DIR):
+            if file.endswith(".json"):
+                try:
+                    pl_name = file.replace(".json", "")
+                    ppath = os.path.join(PLAYLISTS_DIR, file)
+                    with open(ppath, "r", encoding="utf-8") as f:
+                        pdata = json.load(f)
+                    changed = False
+                    for b in pdata.get("botoes", []):
+                        base = os.path.basename(b.get("imagem", "") or "")
+                        if base:
+                            new_img = os.path.join(USER_DATA_DIR, "images", pl_name, base)
+                            if os.path.exists(new_img):
+                                b["imagem"] = new_img
+                                b["imagem_cache"] = ""
+                                changed = True
+                    if changed:
+                        with open(ppath, "w", encoding="utf-8") as f:
+                            json.dump(pdata, f, indent=4, ensure_ascii=False)
+                except Exception:
+                    pass
+        carregar_config()
+        try:
+            recriar_botoes()
+        except Exception:
+            atualizar_estilos()
+        messagebox.showinfo("Backup", "Backup importado com sucesso! Reinicie o aplicativo para aplicar totalmente.")
+    except Exception as e:
+        _show_error("Erro ao importar backup", e)
+    finally:
+        try:
+            if tmpdir and os.path.isdir(tmpdir):
+                shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+
+def abrir_pasta_dados():
+    try:
+        if os.name == 'nt':
+            os.startfile(USER_DATA_DIR)
+        else:
+            webbrowser.open(f"file://{os.path.abspath(USER_DATA_DIR)}")
+    except Exception as e:
+        _show_error("Erro ao abrir pasta de dados", e)
+
 def abrir_config_janela():
     win = ctk.CTkToplevel(app)
     win.title("Configurações dos Botões")
@@ -1292,6 +1430,18 @@ def abrir_config_janela():
                                          variable=repeticao_var,
                                          font=("Arial", 12))
     repeticao_checkbox.pack(side="left", padx=8)
+
+    backup_frame = ctk.CTkFrame(canvas, corner_radius=12, fg_color=("#f3f4f6", "#1e293b"))
+    backup_frame.pack(pady=8, padx=10, fill="x")
+    ctk.CTkLabel(backup_frame, text="💾 Backup", font=("Arial", 16, "bold")).pack(anchor="w", pady=4, padx=8)
+    row_backup = ctk.CTkFrame(backup_frame, fg_color="transparent")
+    row_backup.pack(fill="x", padx=10, pady=6)
+    ctk.CTkButton(row_backup, text="Exportar Backup", fg_color="#2563eb", hover_color="#1d4ed8",
+                  command=exportar_backup).pack(side="left", padx=6)
+    ctk.CTkButton(row_backup, text="Importar Backup", fg_color="#16a34a", hover_color="#15803d",
+                  command=importar_backup).pack(side="left", padx=6)
+    ctk.CTkButton(row_backup, text="Abrir Pasta de Dados", fg_color="#374151", hover_color="#1f2937",
+                  command=abrir_pasta_dados).pack(side="left", padx=6)
 
     ctk.CTkLabel(canvas, text="🎚️ Configuração dos Botões", font=("Arial", 16, "bold")).pack(anchor="w", pady=(15, 5), padx=10)
     # Cores globais
