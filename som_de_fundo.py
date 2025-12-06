@@ -1,4 +1,4 @@
-import os, json, threading, time, math, webbrowser
+import os, sys, json, threading, time, math, webbrowser
 import pygame
 import qrcode
 from remote_control import RemoteControlServer
@@ -97,16 +97,19 @@ def mostrar_sobre():
     y = (sobre_janela.winfo_screenheight() // 2) - (height // 2)
     sobre_janela.geometry(f'{width}x{height}+{x}+{y}')
 
-CONFIG_FILE = "config.json"
-SONS_DIR = "sons"
-ICONS_DIR = "icons"
-PLAYLISTS_DIR = "playlists"
+BASE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+APP_NAME = "Som_de_fundo"
+USER_DATA_DIR = os.path.join(os.path.expanduser("~"), "AppData", "Roaming", APP_NAME)
+CONFIG_FILE = os.path.join(USER_DATA_DIR, "config.json")
+APP_PREFS_FILE = os.path.join(USER_DATA_DIR, "app_prefs.json")
+SONS_DIR = os.path.join(USER_DATA_DIR, "sons")
+PLAYLISTS_DIR = os.path.join(USER_DATA_DIR, "playlists")
+ICONS_DIR = os.path.join(BASE_DIR, "icons")
 FADE_MS = 800
-APP_PREFS_FILE = "app_prefs.json"
 CONFIG_VERSION = 2
 
+os.makedirs(USER_DATA_DIR, exist_ok=True)
 os.makedirs(SONS_DIR, exist_ok=True)
-os.makedirs(ICONS_DIR, exist_ok=True)
 os.makedirs(PLAYLISTS_DIR, exist_ok=True)
 pygame.mixer.init()
 
@@ -1522,7 +1525,7 @@ remote_led.pack(side="right")
 def abrir_controle_remoto_info():
     win = ctk.CTkToplevel(app)
     win.title("Controle Remoto")
-    win.geometry("460x380")
+    win.geometry("520x560")
     win.resizable(False, False)
     win.transient(app)
     win.grab_set()
@@ -1564,21 +1567,6 @@ def abrir_controle_remoto_info():
         render_qr()
     ctk.CTkButton(row, text="Trocar PIN", fg_color="#f59e0b", hover_color="#d97706",
                   command=regenerar).pack(side="left", padx=4)
-    qr_frame = ctk.CTkFrame(top)
-    qr_frame.pack(pady=12)
-    qr_label = ctk.CTkLabel(qr_frame, text="")
-    qr_label.pack()
-    def render_qr():
-        qr = qrcode.QRCode(box_size=8, border=2)
-        qr.add_data(url)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        img = img.resize((200, 200), Image.Resampling.LANCZOS)
-        qr_img = ctk.CTkImage(light_image=img, dark_image=img, size=(200,200))
-        qr_label.configure(image=qr_img)
-        qr_label.image = qr_img
-    render_qr()
-
     ctrl_row = ctk.CTkFrame(top, fg_color="transparent")
     ctrl_row.pack(pady=8)
 
@@ -1600,6 +1588,20 @@ def abrir_controle_remoto_info():
                   command=ligar_servidor).pack(side="left", padx=4)
     ctk.CTkButton(ctrl_row, text="Desligar Servidor", fg_color="#ef4444", hover_color="#dc2626",
                   command=desligar_servidor).pack(side="left", padx=4)
+    qr_frame = ctk.CTkFrame(top)
+    qr_frame.pack(pady=8)
+    qr_label = ctk.CTkLabel(qr_frame, text="")
+    qr_label.pack()
+    def render_qr():
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+        img = img.resize((200, 200), Image.Resampling.LANCZOS)
+        qr_img = ctk.CTkImage(light_image=img, dark_image=img, size=(200,200))
+        qr_label.configure(image=qr_img)
+        qr_label.image = qr_img
+    render_qr()
     
     def atualizar_status_local(ligado):
         status_text.configure(text=("Servidor ligado" if ligado else "Servidor desligado"))
